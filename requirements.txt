@@ -1,0 +1,5 @@
+# requirements.txt - Dependencies for Epic Space Shooter
+
+pygame==2.6.0
+streamlit==1.39.0
+numpy==2.1.1
