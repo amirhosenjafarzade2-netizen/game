@@ -1,6 +1,14 @@
-# main.py - Even further expanded main entry point with additional game states, features, and integrations
+# main.py - Main entry point for Epic Space Shooter with Streamlit integration
+"""
+This module serves as the main entry point for the Epic Space Shooter game.
+It initializes Pygame, manages game states, and handles core game loop logic.
+Integrates with Streamlit via config.json and --load flag for saved games.
+"""
 import pygame
 from pygame.locals import *
+import json
+import sys
+import os
 from player import Player, PlayerControls, PlayerStats
 from enemy import (
     Enemy, KamikazeEnemy, ShooterEnemy, ZigZagEnemy, BomberEnemy, StealthEnemy,
@@ -40,19 +48,24 @@ from config import Config
 from save_game import SaveGame
 from achievements import AchievementSystem
 from logging_system import LoggingSystem
-from multiplayer import MultiplayerManager  # Placeholder for future
+from multiplayer import MultiplayerManager
 from effects import ScreenEffects, ShakeEffect, FadeEffect
 from input_handler import InputHandler
 from collision_manager import CollisionManager
 from resource_loader import ResourceLoader
+from level_designs import Level1Design, Level2Design, Level3Design, Level4Design, Level5Design, Level6Design, Level7Design
 
-# Initialize Pygame and other systems
+# Initialize Pygame
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Epic Space Shooter - Ultimate Shmup Edition")
 clock = pygame.time.Clock()
 
 # Initialize all game objects and managers
+"""
+Initialize core game components, including player, enemies, UI, and managers.
+Each manager handles a specific aspect of the game (e.g., collisions, particles).
+"""
 player = Player()
 player_controls = PlayerControls(player)
 player_stats = PlayerStats(player)
@@ -88,31 +101,71 @@ config = Config()
 save_game = SaveGame()
 achievements = AchievementSystem()
 logging_system = LoggingSystem()
-multiplayer_manager = MultiplayerManager()  # Placeholder
+multiplayer_manager = MultiplayerManager()  # Placeholder for future multiplayer
 screen_effects = ScreenEffects(screen)
 input_handler = InputHandler()
 collision_manager = CollisionManager()
 resource_loader = ResourceLoader()
 
 # Load resources
-resource_loader.load_images()
-resource_loader.load_sounds()
-resource_loader.load_fonts()
+"""
+Load all game assets (images, sounds, fonts) using the resource loader.
+This ensures all assets are available before the game starts.
+"""
+resource_loader.load_all_images()
+resource_loader.load_all_sounds()
+resource_loader.load_font("default", 36)
+resource_loader.load_font("small", 24)
+
+# Load configuration from Streamlit
+"""
+Read configuration settings from config.json if it exists.
+This allows Streamlit (app.py) to set difficulty and audio volumes.
+"""
+if os.path.exists("config.json"):
+    try:
+        with open("config.json", "r") as f:
+            config_data = json.load(f)
+            config.set_difficulty(config_data.get("difficulty", "normal"))
+            config.sound_volume = config_data.get("sound_volume", 1.0)
+            config.music_volume = config_data.get("music_volume", 0.8)
+        sound_manager.set_volume(config.sound_volume)
+        music_manager.set_volume(config.music_volume)
+    except json.JSONDecodeError:
+        logging_system.log_event("Error: Invalid config.json format")
+    except Exception as e:
+        logging_system.log_event(f"Error loading config: {e}")
 
 # Game variables
+"""
+Initialize core game variables, including state, difficulty, and counters.
+Check for --load flag to start in playing state with saved data.
+"""
 game_state = "menu"
+load_game = "--load" in sys.argv
+if load_game:
+    game_state = "playing"
 running = True
 paused = False
 difficulty = config.get_difficulty()
 current_level = 1
 wave_count = 0
 boss_active = False
-multiplayer_mode = False  # Toggle for future
+multiplayer_mode = False  # Placeholder for future multiplayer
 
+# Main game loop
+"""
+The main game loop handles all game states: menu, settings, highscores, playing, and game over.
+Processes input, updates game objects, and renders the scene at 60 FPS.
+"""
 while running:
     input_handler.handle_events()  # Centralized input handling
 
     if game_state == "menu":
+        """
+        Menu state: Display main menu and handle user selections.
+        Supports starting a new game, loading a saved game, settings, high scores, or quitting.
+        """
         menu.draw(screen)
         action = menu.handle_selection(input_handler.get_keys())
         if action == "start":
@@ -125,38 +178,74 @@ while running:
             level_manager.reset()
             score_system.reset()
             achievements.reset()
+            wave_count = 0
+            boss_active = False
             music_manager.play_background_music("level1")
-        elif action == "load":
+            logging_system.log_event("New game started")
+        elif action == "load" or load_game:
             save_data = save_game.load()
             if save_data:
                 player.load_from_save(save_data['player'])
                 level_manager.level = save_data['level']
                 score_system.score = save_data['score']
+                current_level = level_manager.level
                 game_state = "playing"
+                load_game = False  # Reset flag after loading
+                music_manager.play_background_music(f"level{current_level}")
+                logging_system.log_event("Loaded saved game")
+            else:
+                logging_system.log_event("No save file found")
         elif action == "settings":
             game_state = "settings"
         elif action == "highscores":
             game_state = "highscores"
         elif action == "quit":
             running = False
+            logging_system.log_event("Game quit from menu")
+        pygame.display.flip()
+
     elif game_state == "settings":
+        """
+        Settings state: Allow configuration of difficulty, audio, and controls.
+        Updates config object and saves changes.
+        """
         settings_menu.draw(screen)
         settings_action = settings_menu.handle_selection(input_handler.get_keys())
         if settings_action == "back":
             game_state = "menu"
         elif settings_action == "difficulty":
             config.set_difficulty(settings_menu.get_selected_difficulty())
-        # More settings handling
+            difficulty = config.get_difficulty()
+            logging_system.log_event(f"Difficulty set to {config.difficulty}")
+        elif settings_action == "sound_volume":
+            config.sound_volume = settings_menu.get_selected_volume()
+            sound_manager.set_volume(config.sound_volume)
+        elif settings_action == "music_volume":
+            config.music_volume = settings_menu.get_selected_volume()
+            music_manager.set_volume(config.music_volume)
+        pygame.display.flip()
+
     elif game_state == "highscores":
+        """
+        Highscores state: Display top scores and allow returning to menu.
+        """
         highscore_menu.draw(screen, highscore.get_top_scores())
         if input_handler.is_key_pressed(K_ESCAPE):
             game_state = "menu"
+            logging_system.log_event("Returned to menu from highscores")
+        pygame.display.flip()
+
     elif game_state == "playing":
+        """
+        Playing state: Core game loop with updates, collisions, and rendering.
+        Handles pausing, entity updates, and level progression.
+        """
         if paused:
             pause_menu.draw(screen)
             pause_action = pause_menu.handle_selection(input_handler.get_keys())
             if pause_action == "resume":
                 paused = False
+                logging_system.log_event("Game resumed")
             elif pause_action == "save":
                 save_data = {
                     'player': player.save_data(),
@@ -164,10 +253,14 @@ while running:
                     'score': score_system.score
                 }
                 save_game.save(save_data)
+                logging_system.log_event("Game saved")
             elif pause_action == "settings":
                 game_state = "settings"
             elif pause_action == "quit":
                 game_state = "menu"
+                music_manager.stop_music()
+                logging_system.log_event("Quit to menu from pause")
+            pygame.display.flip()
             continue
 
         # Update player
@@ -177,27 +270,39 @@ while running:
         # Level and wave management
         level_manager.update()
         wave_manager.update()
+        current_level = level_manager.level
 
         # Spawn entities
         if wave_manager.should_spawn_wave():
             wave_count += 1
-            for _ in range(wave_manager.get_wave_size(current_level)):
-                enemy_type = level_designer.get_enemy_for_level(current_level)
-                enemy = enemy_type()
+            # Use level-specific designs
+            level_design = {
+                1: Level1Design,
+                2: Level2Design,
+                3: Level3Design,
+                4: Level4Design,
+                5: Level5Design,
+                6: Level6Design,
+                7: Level7Design
+                # Add more levels up to MAX_LEVEL
+            }.get(current_level, Level1Design)(current_level)
+            for enemy in level_design.get_wave(wave_count % MAX_WAVES_PER_LEVEL):
                 enemy_ai.apply_ai(enemy, current_level)
                 enemies.add(enemy)
+            logging_system.log_event(f"Spawned wave {wave_count} in level {current_level}")
 
         if level_manager.should_spawn_powerup():
-            powerup_type = level_designer.get_powerup_for_level(current_level)
-            powerup = powerup_type()
+            powerup = level_design.get_powerup()
             powerups.add(powerup)
+            logging_system.log_event("Spawned powerup")
 
         if wave_manager.is_mini_boss_wave(wave_count):
             mini_boss = MiniBoss(current_level)
             boss_ai.apply_ai(mini_boss)
             enemies.add(mini_boss)
+            logging_system.log_event("Spawned mini-boss")
 
-        if level_manager.is_boss_time():
+        if level_manager.is_boss_time() and not boss_active:
             if current_level == MAX_LEVEL:
                 boss = FinalBoss()
             else:
@@ -206,6 +311,7 @@ while running:
             enemies.add(boss)
             boss_active = True
             music_manager.play_background_music("boss")
+            logging_system.log_event(f"Spawned boss for level {current_level}")
 
         # Update entities
         enemies.update(enemy_bullets, player, difficulty, screen_effects)
@@ -217,6 +323,7 @@ while running:
         nebula_background.update()
         planet_background.update()
         animation_manager.update()
+        score_system.update()
 
         # Collision handling
         collision_manager.handle_player_enemies(player, enemies, particles, sound_manager, score_system, achievements)
@@ -224,10 +331,13 @@ while running:
         collision_manager.handle_powerups(player, powerups, sound_manager, achievements)
         collision_manager.handle_enemy_bullets(player, enemy_bullets, sound_manager)
 
+        # Check for game over
         if player.health <= 0:
             game_state = "game_over"
             music_manager.play_sound("game_over")
             screen_effects.apply_fade_out()
+            highscore.update(score_system.score)
+            logging_system.log_event(f"Game over - Score: {score_system.score}")
 
         # Drawing
         background.draw(screen)
@@ -248,15 +358,28 @@ while running:
 
         pygame.display.flip()
         clock.tick(FPS)
-
         logging_system.log_frame_stats(clock.get_fps())
+
     elif game_state == "game_over":
-        # Game over logic with animations
+        """
+        Game over state: Display final score and high score, allow restarting.
+        Applies screen shake and fade effects for dramatic effect.
+        """
         screen_effects.apply_shake()
         ui.draw_game_over(screen, score_system.score, highscore)
         if input_handler.is_key_pressed(K_r):
             game_state = "menu"
+            music_manager.stop_music()
+            logging_system.log_event("Returned to menu from game over")
+        pygame.display.flip()
 
 # Cleanup
+"""
+Clean up Pygame and logging resources on exit.
+Remove temporary config file if it exists.
+"""
 pygame.quit()
 logging_system.close()
+if os.path.exists("config.json"):
+    os.remove("config.json")
+logging_system.log_event("Game terminated")
